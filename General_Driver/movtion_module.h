@@ -390,8 +390,15 @@ void rosCtrl(float rosX, float rosZ) {
   setGoalSpeed(setpointA, setpointB);
 }
 
+// Motion-command watchdog, called every loop() iteration.
+// lastCmdRecvTime is refreshed by every valid motion command (T:1, T:11,
+// T:13 in jsonCmdReceiveHandler) - including explicit zero commands, so a
+// host actively sending zeros counts as alive-and-stopped. On timeout the
+// goal speeds are forced to zero (the PID then brakes the wheels to a stop
+// on mainType 3 / direct PWM is zeroed on mainType 1/2) and the stop is
+// latched by heartbeatStopFlag until the next motion command arrives.
 void heartBeatCtrl() {
-  if (currentTimeMillis - lastCmdRecvTime > HEART_BEAT_DELAY) {
+  if (millis() - lastCmdRecvTime > (unsigned long)HEART_BEAT_DELAY) {
     if (!heartbeatStopFlag) {
       heartbeatStopFlag = true;
       setGoalSpeed(0, 0);

@@ -364,7 +364,15 @@ bool uartCmdEcho = 1;
 
 #define SERVO_STOP_DELAY 3
 
-int HEART_BEAT_DELAY = 3000;
+// Motion-command watchdog timeout in milliseconds.
+// If no valid motion command (T:1 speed ctrl, T:11 PWM input, T:13 ROS
+// velocity ctrl) arrives within this window, heartBeatCtrl() forces the
+// motor outputs to zero. The watchdog is armed from boot, so the default
+// state is stopped until the first motion command is received.
+// Can be tuned at runtime with {"T":136,"cmd":<ms>} (CMD_HEART_BEAT_SET).
+#define MOTION_CMD_WATCHDOG_MS 500
+
+int HEART_BEAT_DELAY = MOTION_CMD_WATCHDOG_MS;
 unsigned long lastCmdRecvTime = millis();
 
 
