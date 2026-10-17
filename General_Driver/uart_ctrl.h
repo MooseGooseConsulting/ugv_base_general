@@ -1,32 +1,17 @@
 void jsonCmdReceiveHandler(){
 	int cmdType = jsonCmdReceive["T"].as<int>();
 	switch(cmdType){
-	case CMD_SPEED_CTRL:
-        if (jsonCmdReceive["L"].is<float>() && jsonCmdReceive["R"].is<float>() &&
-            setGoalSpeed(jsonCmdReceive["L"], jsonCmdReceive["R"])) {
-            heartbeatStopFlag = false;
-            lastCmdRecvTime = millis();
-        }
+    case CMD_SPEED_CTRL:
+        if (jsonCmdReceive["L"].is<float>() && jsonCmdReceive["R"].is<float>())
+            setGoalSpeed(jsonCmdReceive["L"], jsonCmdReceive["R"]);
         break;
     case CMD_PWM_INPUT:
-        if (jsonCmdReceive["L"].is<float>() && jsonCmdReceive["R"].is<float>()) {
-            const float left = jsonCmdReceive["L"];
-            const float right = jsonCmdReceive["R"];
-            if (isfinite(left) && isfinite(right)) {
-                usePIDCompute = false;
-                leftCtrl(left);
-                rightCtrl(right);
-                heartbeatStopFlag = false;
-                lastCmdRecvTime = millis();
-            }
-        }
+        if (jsonCmdReceive["L"].is<float>() && jsonCmdReceive["R"].is<float>())
+            setWheelPwm(jsonCmdReceive["L"], jsonCmdReceive["R"]);
         break;
     case CMD_ROS_CTRL:
-        if (jsonCmdReceive["X"].is<float>() && jsonCmdReceive["Z"].is<float>() &&
-            rosCtrl(jsonCmdReceive["X"], jsonCmdReceive["Z"])) {
-            heartbeatStopFlag = false;
-            lastCmdRecvTime = millis();
-        }
+        if (jsonCmdReceive["X"].is<float>() && jsonCmdReceive["Z"].is<float>())
+            rosCtrl(jsonCmdReceive["X"], jsonCmdReceive["Z"]);
         break;
 	case CMD_SET_MOTOR_PID:
 												setPID(

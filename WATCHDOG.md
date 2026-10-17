@@ -7,78 +7,95 @@ If the host (ROS driver / upper computer) dies or the link drops mid-motion,
 the robot keeps driving. This caused a documented wall collision on
 2026-09-03 (MooseGooseConsulting UGV Beast).
 
-## Unresolved safety blocker
+## Wheel ownership and watchdog
 
-Blocking missions can prevent both the watchdog and wheel PID from running.
-The input-validation and browser-cadence fixes do not close that gap. This branch
-is not evidence of a 500 ms stop boundary during arbitrary mission commands;
-that review finding remains open pending a synchronized wheel-control owner and
-firmware/physical acceptance. No robot was flashed or operated for this review.
+`movtion_module.h` runs encoder sampling, PID and motor writes in one FreeRTOS
+wheel task. It starts before the blocking `boot` mission. A nominal 5 ms period
+(minimum one RTOS tick) and priority 3 let it preempt Arduino's priority-1 command
+loop without depending on mission steps returning. The task has no core affinity.
+It dispatches no commands and calls no filesystem, network, serial, servo or
+mission functions. A mutex serializes its short wheel service with POD command
+updates; command contexts never write wheel pins or mutate PID objects.
 
-## Design
+- `MOTION_CMD_WATCHDOG_MS` is the initial timeout, default **500 ms**.
+- Only accepted `T:1` speed, `T:11` PWM and `T:13` ROS velocity commands replace
+  the request and its acceptance timestamp. Accepted zeros also refresh it.
+  UART, HTTP, ESP-NOW and mission steps all use the same JSON handler.
+- The pure policy in `wheel_control_state.h` uses unsigned elapsed time across
+  `millis()` rollover. After elapsed time exceeds the timeout, Beast/type 3
+  enters zero-goal PID braking; types 1/2 disable PWM. Expiry stays latched until
+  a fresh accepted motion command. Configuration updates first apply the old
+  deadline, so increasing the timeout cannot revive an expired request.
+- `T:115` emergency stop and `T:900` type reconfiguration request a hard stop,
+  independent of PID braking, until a fresh motion command. These requests take
+  effect at the next wheel service. A reset epoch preserves PID reset events
+  even if stop and new motion both arrive between task samples. PID reentry
+  transitions through manual mode to clear the previous integral and output.
+- Motion is rejected if mutex/task creation fails; initialized motor outputs
+  remain off. There is no fallback to a mission-dependent loop watchdog.
+- Timeout `T:136` accepts positive, representable integer milliseconds. Zero,
+  negative, fractional and missing settings preserve the previous timeout.
+  The browser refreshes moving commands every 100 ms. A shorter custom timeout
+  requires a matching producer cadence and transport margin.
+- Speed/ROS requests must be finite, with the existing Beast wheel-speed bound
+  of ±2 m/s. Direct PWM must have both finite numeric fields within ±255.
+  Other base types map speed to PWM in double precision and reject either scaled
+  wheel value outside ±255 before acceptance or integer conversion.
+  Rejected motion leaves the request and deadline unchanged.
+- Wheel scales affect subsequent accepted speed/ROS commands, as in the prior
+  implementation; changing scale does not refresh a motion deadline. PID gains
+  are applied by the task. The legacy limits setting is retained, while PID
+  output remains bounded to ±255.
+- Feedback reads copy both measured wheel speeds and scale values under the
+  mutex, then serialize outside it. `L`/`R` speed feedback is measured m/s for
+  every type; the old non-Beast path intermittently overwrote those fields with
+  PWM, making units depend on when feedback ran.
+- Arm and gimbal sequencing remain in their existing command context.
+  Unused, unexposed switch/light helpers that directly wrote motor pins were
+  removed; the active switch-off command uses the shared stop request.
 
-This branch tightens and hardens the firmware's existing heartbeat into a
-proper motion-command watchdog:
+## Acceptance still required
 
-- `MOTION_CMD_WATCHDOG_MS` (`General_Driver/ugv_config.h`) — single named
-  constant for the timeout, default **500 ms**.
-- `lastCmdRecvTime` is refreshed by every **valid motion command** handled in
-  `jsonCmdReceiveHandler()` (`General_Driver/uart_ctrl.h`):
-  - `T:1` (`CMD_SPEED_CTRL`) — wheel speed
-  - `T:11` (`CMD_PWM_INPUT`) — raw PWM
-  - `T:13` (`CMD_ROS_CTRL`) — ROS velocity (m/s, rad/s)
-  Explicit zero commands count as a refresh: a host actively sending zeros
-  is alive and stopped, which is correct.
-- `heartBeatCtrl()` (`General_Driver/movtion_module.h`) runs every `loop()`
-  iteration in `General_Driver.ino`. If `millis() - lastCmdRecvTime` exceeds
-  the timeout it calls `setGoalSpeed(0, 0)`:
-  - UGV Beast (`mainType == 3`, PID mode): goal speeds are forced to zero and
-    the PID loop actively brakes the wheels.
-  - WAVE ROVER / UGV02 (`mainType` 1/2, direct PWM): PWM outputs are zeroed.
-  The stop latches (`heartbeatStopFlag`) until the next motion command.
-- **Armed from boot**: `lastCmdRecvTime` is initialized at power-on, so if no
-  motion command ever arrives the outputs are forced to zero one timeout
-  after boot. Default state is stopped.
-- The timeout accepts positive integer milliseconds with `{"T":136,"cmd":<ms>}`
-  (`CMD_HEART_BEAT_SET`). Zero, negative, noninteger, out-of-range, and missing
-  settings preserve the previous timeout. The built-in browser refreshes moving
-  commands every 100 ms, below the default 500 ms window; custom shorter timeouts
-  require matching producer cadence and transport margin.
+An independent task closes the source-level blocking-mission gap. A nominal
+service period is **not a physical stopping-time guarantee**: RTOS starvation,
+interrupt/driver delays, power-stage behavior and braking on the actual robot
+still need supervised acceptance. No robot was flashed, connected or operated
+for this review. Do not treat a host test or successful compile as readiness to
+return a robot to service.
 
-Because all command transports — UART/USB serial, the HTTP `/js` endpoint,
-ESP-NOW JSON payloads, and stored mission steps — funnel through
-`jsonCmdReceiveHandler()`, accepted motion commands from every source refresh the same timestamp. This
-does not establish watchdog execution while a handler is blocked.
+## Reproducible build
 
-### Behavioral notes / caveats
+This is an Arduino sketch. The reviewed compile uses Arduino CLI 1.5.1, board
+`esp32:esp32:esp32`, ESP32 core **2.0.17** (the sketch uses the legacy LEDC API),
+and the following Library Manager versions:
 
-- The watchdog guards the **wheel/motor outputs only**. Arm (RoArm-M2 bus
-  servos) and gimbal commands are unaffected and keep their own
-  interpolation/stop logic.
-- Stored missions (e.g. the `boot` mission) that issue motion steps refresh
-  the timestamp when each valid motion step is accepted. The current blocking
-  execution prevents a general stop-time guarantee; see the unresolved blocker.
-- ESP-NOW follower robots receiving wheel commands over ESP-NOW refresh the
-  watchdog through the same JSON handler.
-- A rejected speed/ROS command does not refresh the timestamp, clear the stop
-  latch, change control mode, or replace PID setpoints. Explicit accepted zeros
-  still refresh the timestamp. PWM commands require both finite numeric inputs.
+| Library | Version |
+| --- | --- |
+| ArduinoJson | 6.21.5 |
+| Adafruit SSD1306 | 2.5.17 |
+| Adafruit GFX Library | 1.12.6 |
+| Adafruit BusIO | 1.17.4 |
+| INA219_WE | 1.3.8 |
+| ESP32Encoder | 0.11.7 |
+| PID_v2 | 2.0.1 |
+| SimpleKalmanFilter | 0.2.0 |
+| Adafruit ICM20X | 2.0.7 |
+| Adafruit Unified Sensor | 1.1.15 |
 
-## Build
+LittleFS, WiFi, WebServer, Wire and SPI come from the core. Use this repository's
+`SCServo` library. New INA219_WE 1.4.1 uses renamed enum constants and fails in
+unchanged battery code; pin 1.3.8 for this build. The deployed firmware/library
+versions have not been established.
 
-This is an **Arduino sketch** (not ESP-IDF / PlatformIO).
+```sh
+arduino-cli core install esp32:esp32@2.0.17 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+arduino-cli lib install 'ArduinoJson@6.21.5' 'Adafruit SSD1306@2.5.17' 'Adafruit GFX Library@1.12.6' 'Adafruit BusIO@1.17.4' 'INA219_WE@1.3.8' 'ESP32Encoder@0.11.7' 'PID_v2@2.0.1' 'SimpleKalmanFilter@0.2.0' 'Adafruit ICM20X@2.0.7' 'Adafruit Unified Sensor@1.1.15'
+arduino-cli compile --fqbn esp32:esp32:esp32 --library ./SCServo General_Driver
+```
 
-1. Install [Arduino IDE](https://www.arduino.cc/en/software) and the
-   **esp32** board package by Espressif (Boards Manager).
-2. Copy the `SCServo` folder from this repo into
-   `C:\Users\<you>\AppData\Local\Arduino15\libraries\`
-   (or `~/Arduino/libraries/`).
-3. Install via Library Manager: **ArduinoJson**, **LittleFS**,
-   **Adafruit_SSD1306**, **INA219_WE**, **ESP32Encoder**, **PID_v2**,
-   **SimpleKalmanFilter**, **Adafruit_ICM20X**, **Adafruit_ICM20948**,
-   **Adafruit_Sensor**.
-4. Open `General_Driver/General_Driver.ino`, select board **ESP32 Dev
-   Module**, and compile.
+The core's esptool build hook also requires its Python dependencies (including
+pyserial). The review used an isolated Python 3.12 environment; no upload command
+was run.
 
 ## Flashing the UGV Beast
 
@@ -113,20 +130,33 @@ This is an **Arduino sketch** (not ESP-IDF / PlatformIO).
 7. **Ground test**: robot on the floor in an open area, minimum speed.
    Repeat the `kill -9` test. The robot must coast/brake to a stop within
    ~1 s and well under one wheel-rotation of travel.
-8. Only then return the robot to normal service.
+8. Repeat on blocks with a stored mission that commands low wheel speed then
+   blocks in `T:111` longer than the watchdog, including the `boot` mission path.
+   Repeat during arm/gimbal commands that wait on servo feedback; wheels must
+   stop while the command remains blocked. Test PWM and speed/ROS modes, each
+   supported base type, emergency stop/reentry and timeout changes after expiry.
+9. Only after all applicable acceptance checks pass, return the robot to service.
 
 ## Host regression checks
 
-No serial device or hardware is used. With Python 3 and g++ installed, fetch the
-pinned upstream ArduinoJson headers outside the firmware tree and run:
+No serial device or hardware is used. With Python 3 and g++ installed, fetch
+ArduinoJson v6.21.5 and PID_v2 2.0.1 outside the firmware tree, then run:
 
 ```sh
 git clone --depth 1 --branch v6.21.5 https://github.com/bblanchon/ArduinoJson.git /tmp/ugv-arduinojson-6.21.5
-ARDUINOJSON_INCLUDE=/tmp/ugv-arduinojson-6.21.5/src python3 -m unittest discover -s tests -v
+# PID_v2 2.0.1 is installed by the build commands above.
+ARDUINOJSON_INCLUDE=/tmp/ugv-arduinojson-6.21.5/src PID_LIBRARY="$HOME/Arduino/libraries/PID_v2" python3 -m unittest discover -s tests -v
 ```
 
-The checks compile extracted production motion/timeout functions and command
-cases against real ArduinoJson JSON parsing, with inert PID/motor/clock stubs.
-They cover timeout rejection, rejected speed/ROS state, malformed PWM, accepted
-zeros, and browser cadence. They do not compile the full ESP32 sketch, establish
-the deployed library version, or prove scheduling, braking, or mission safety.
+The harness compiles the complete production wheel adapter, pure state policy,
+actual motion/timeout JSON cases, real ArduinoJson and real PID_v2. GPIO, encoder,
+clock and RTOS interfaces are inert host adapters. Fourteen native scenarios cover
+invalid settings/motion, rollover, PWM bounds, scaled speed/ROS overrange rejection without deadline refresh, direct-PWM expiry on all base types,
+zero-PWM followed by type changes, configuration after expiry,
+emergency stop, PID integral clearing, stop/reentry and expiry/new-motion between samples, creation
+failures, and an actual production task running while the host command context
+sleeps past the timeout. A separate check covers browser cadence.
+
+This checks the concurrency structure with a host thread; it does not reproduce
+FreeRTOS scheduling, target driver timing, real encoder/physical braking, or the
+actual deployed firmware. The full sketch compile is a separate check.

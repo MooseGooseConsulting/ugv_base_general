@@ -383,8 +383,9 @@ void baseInfoFeedback() {
 	jsonInfoHttp.clear();
 	jsonInfoHttp["T"] = FEEDBACK_BASE_INFO;
 
-	jsonInfoHttp["L"] = speedGetA;
-	jsonInfoHttp["R"] = speedGetB;
+	const auto wheels = wheelFeedback();
+	jsonInfoHttp["L"] = wheels.left;
+	jsonInfoHttp["R"] = wheels.right;
 
 	jsonInfoHttp["r"] = icm_roll;
 	jsonInfoHttp["p"] = icm_pitch;
@@ -445,8 +446,9 @@ void setCmdEcho(bool inputCmd) {
 void saveSpdRate() {
 	jsonInfoHttp.clear();
 	jsonInfoHttp["T"] = CMD_SET_SPD_RATE;
-	jsonInfoHttp["L"] = spd_rate_A;
-	jsonInfoHttp["R"] = spd_rate_B;
+	const auto wheels = wheelFeedback();
+	jsonInfoHttp["L"] = wheels.scaleLeft;
+	jsonInfoHttp["R"] = wheels.scaleRight;
 	String getInfoJsonString;
 	serializeJson(jsonInfoHttp, getInfoJsonString);
 	appendStepJson("boot", getInfoJsonString);
