@@ -1,29 +1,33 @@
 void jsonCmdReceiveHandler(){
 	int cmdType = jsonCmdReceive["T"].as<int>();
 	switch(cmdType){
-	case CMD_SPEED_CTRL:	if (jsonCmdReceive.containsKey("T") &&
-														jsonCmdReceive.containsKey("L") &&
-														jsonCmdReceive.containsKey("R")){
-													if (jsonCmdReceive["L"].is<float>() &&
-															jsonCmdReceive["R"].is<float>()){
-														heartbeatStopFlag = false;
-														lastCmdRecvTime = millis();
-														setGoalSpeed(
-														jsonCmdReceive["L"],
-														jsonCmdReceive["R"]);
-													}
-												} break;
-	case CMD_PWM_INPUT:		usePIDCompute = false;
-												heartbeatStopFlag = false;
-												lastCmdRecvTime = millis();
-												leftCtrl(jsonCmdReceive["L"]);
-												rightCtrl(jsonCmdReceive["R"]);
-												break;
-	case CMD_ROS_CTRL:		rosCtrl(
-												jsonCmdReceive["X"],
-												jsonCmdReceive["Z"]);
-												heartbeatStopFlag = false;
-												lastCmdRecvTime = millis();break;
+	case CMD_SPEED_CTRL:
+        if (jsonCmdReceive["L"].is<float>() && jsonCmdReceive["R"].is<float>() &&
+            setGoalSpeed(jsonCmdReceive["L"], jsonCmdReceive["R"])) {
+            heartbeatStopFlag = false;
+            lastCmdRecvTime = millis();
+        }
+        break;
+    case CMD_PWM_INPUT:
+        if (jsonCmdReceive["L"].is<float>() && jsonCmdReceive["R"].is<float>()) {
+            const float left = jsonCmdReceive["L"];
+            const float right = jsonCmdReceive["R"];
+            if (isfinite(left) && isfinite(right)) {
+                usePIDCompute = false;
+                leftCtrl(left);
+                rightCtrl(right);
+                heartbeatStopFlag = false;
+                lastCmdRecvTime = millis();
+            }
+        }
+        break;
+    case CMD_ROS_CTRL:
+        if (jsonCmdReceive["X"].is<float>() && jsonCmdReceive["Z"].is<float>() &&
+            rosCtrl(jsonCmdReceive["X"], jsonCmdReceive["Z"])) {
+            heartbeatStopFlag = false;
+            lastCmdRecvTime = millis();
+        }
+        break;
 	case CMD_SET_MOTOR_PID:
 												setPID(
 												jsonCmdReceive["P"],
@@ -88,8 +92,10 @@ void jsonCmdReceiveHandler(){
 	case CMD_GIMBAL_CTRL_STOP:
 												gimbalCtrlStop();break;
 	case CMD_HEART_BEAT_SET:
-												changeHeartBeatDelay(
-												jsonCmdReceive["cmd"]);break;
+        if (jsonCmdReceive["cmd"].is<int>()) {
+            changeHeartBeatDelay(jsonCmdReceive["cmd"]);
+        }
+        break;
 	case CMD_GIMBAL_STEADY:
 												gimbalSteadySet(
 												jsonCmdReceive["s"],

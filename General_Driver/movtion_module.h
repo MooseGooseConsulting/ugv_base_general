@@ -289,19 +289,15 @@ void rightCtrl(float pwmInputB){
   }
 }
 
-void setGoalSpeed(float inputLeft, float inputRight) {
+bool setGoalSpeed(float inputLeft, float inputRight) {
+  // Reject before changing control mode or PID state.
+  if (!isfinite(inputLeft) || !isfinite(inputRight)) return false;
+  if (mainType == 3 && (inputLeft < -2.0 || inputLeft > 2.0 ||
+                        inputRight < -2.0 || inputRight > 2.0)) return false;
   // setpoint_cmd_recv = millis();
   if (mainType == 3) {
     usePIDCompute = true;
 
-    if(inputLeft < -2.0 || inputLeft > 2.0){
-      return;
-    }
-
-    if(inputRight < -2.0 || inputRight > 2.0){
-      return;
-    }
-    
     setpointA = inputLeft*spd_rate_A;
     setpointB = inputRight*spd_rate_B;
 
@@ -319,6 +315,7 @@ void setGoalSpeed(float inputLeft, float inputRight) {
     leftCtrl(inputLeft * 512 * spd_rate_A);
     rightCtrl(inputRight * 512 * spd_rate_B);
   }
+  return true;
 }
 
 void pidControllerCompute() {
@@ -384,10 +381,10 @@ void setPID(float inputP, float inputI, float inputD, float inputLimits) {
   pidB.SetTunings(__kp, __ki, __kd);
 }
 
-void rosCtrl(float rosX, float rosZ) {
-  setpointA = rosX - (rosZ * TRACK_WIDTH / 2.0);
-  setpointB = rosX + (rosZ * TRACK_WIDTH / 2.0);
-  setGoalSpeed(setpointA, setpointB);
+bool rosCtrl(float rosX, float rosZ) {
+  const float left = rosX - (rosZ * TRACK_WIDTH / 2.0);
+  const float right = rosX + (rosZ * TRACK_WIDTH / 2.0);
+  return setGoalSpeed(left, right);
 }
 
 // Motion-command watchdog, called every loop() iteration.
@@ -409,7 +406,7 @@ void heartBeatCtrl() {
 }
 
 void changeHeartBeatDelay(int inputCmd) {
-  HEART_BEAT_DELAY = inputCmd;
+  if (inputCmd > 0) HEART_BEAT_DELAY = inputCmd;
 }
 
 void mm_settings(byte inputMain, byte inputModule) {

@@ -452,7 +452,7 @@ const char index_html[] PROGMEM = R"rawliteral(
                         <button class="w-btn" onclick="cmdFill('jsonData', 'cmd143');">INPUT</button>
                     </div>
                     <div>
-                        <p>CMD_HEART_BEAT_SET: <span id="cmd136" class="cmd-value">{"T":136,"cmd":0}</span></p>
+                        <p>CMD_HEART_BEAT_SET: <span id="cmd136" class="cmd-value">{"T":136,"cmd":500}</span></p>
                         <button class="w-btn" onclick="cmdFill('jsonData', 'cmd136');">INPUT</button>
                     </div>
                 </div>
@@ -665,7 +665,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 
     setInterval(function() {
         heartBeat();
-    }, 1500);
+    }, 100);
 
     setInterval(function() {
         infoUpdate();

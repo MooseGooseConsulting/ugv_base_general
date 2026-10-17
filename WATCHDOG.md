@@ -7,6 +7,14 @@ If the host (ROS driver / upper computer) dies or the link drops mid-motion,
 the robot keeps driving. This caused a documented wall collision on
 2026-09-03 (MooseGooseConsulting UGV Beast).
 
+## Unresolved safety blocker
+
+Blocking missions can prevent both the watchdog and wheel PID from running.
+The input-validation and browser-cadence fixes do not close that gap. This branch
+is not evidence of a 500 ms stop boundary during arbitrary mission commands;
+that review finding remains open pending a synchronized wheel-control owner and
+firmware/physical acceptance. No robot was flashed or operated for this review.
+
 ## Design
 
 This branch tightens and hardens the firmware's existing heartbeat into a
@@ -31,13 +39,16 @@ proper motion-command watchdog:
 - **Armed from boot**: `lastCmdRecvTime` is initialized at power-on, so if no
   motion command ever arrives the outputs are forced to zero one timeout
   after boot. Default state is stopped.
-- The timeout remains tunable at runtime with `{"T":136,"cmd":<ms>}`
-  (`CMD_HEART_BEAT_SET`), e.g. raise it temporarily for bench debugging.
+- The timeout accepts positive integer milliseconds with `{"T":136,"cmd":<ms>}`
+  (`CMD_HEART_BEAT_SET`). Zero, negative, noninteger, out-of-range, and missing
+  settings preserve the previous timeout. The built-in browser refreshes moving
+  commands every 100 ms, below the default 500 ms window; custom shorter timeouts
+  require matching producer cadence and transport margin.
 
 Because all command transports — UART/USB serial, the HTTP `/js` endpoint,
 ESP-NOW JSON payloads, and stored mission steps — funnel through
-`jsonCmdReceiveHandler()`, the watchdog covers every command source, not just
-the ROS serial link.
+`jsonCmdReceiveHandler()`, accepted motion commands from every source refresh the same timestamp. This
+does not establish watchdog execution while a handler is blocked.
 
 ### Behavioral notes / caveats
 
@@ -45,13 +56,13 @@ the ROS serial link.
   servos) and gimbal commands are unaffected and keep their own
   interpolation/stop logic.
 - Stored missions (e.g. the `boot` mission) that issue motion steps refresh
-  the watchdog while executing; motion is forced to zero one timeout after
-  the mission's last motion step. This is intentional (fail-safe).
+  the timestamp when each valid motion step is accepted. The current blocking
+  execution prevents a general stop-time guarantee; see the unresolved blocker.
 - ESP-NOW follower robots receiving wheel commands over ESP-NOW refresh the
   watchdog through the same JSON handler.
-- `{"T":136,"cmd":0}` makes the watchdog fire immediately and continuously
-  (motors can never run). Do not use `0`; the web page's documented example
-  value of `0` should be avoided.
+- A rejected speed/ROS command does not refresh the timestamp, clear the stop
+  latch, change control mode, or replace PID setpoints. Explicit accepted zeros
+  still refresh the timestamp. PWM commands require both finite numeric inputs.
 
 ## Build
 
@@ -103,3 +114,19 @@ This is an **Arduino sketch** (not ESP-IDF / PlatformIO).
    Repeat the `kill -9` test. The robot must coast/brake to a stop within
    ~1 s and well under one wheel-rotation of travel.
 8. Only then return the robot to normal service.
+
+## Host regression checks
+
+No serial device or hardware is used. With Python 3 and g++ installed, fetch the
+pinned upstream ArduinoJson headers outside the firmware tree and run:
+
+```sh
+git clone --depth 1 --branch v6.21.5 https://github.com/bblanchon/ArduinoJson.git /tmp/ugv-arduinojson-6.21.5
+ARDUINOJSON_INCLUDE=/tmp/ugv-arduinojson-6.21.5/src python3 -m unittest discover -s tests -v
+```
+
+The checks compile extracted production motion/timeout functions and command
+cases against real ArduinoJson JSON parsing, with inert PID/motor/clock stubs.
+They cover timeout rejection, rejected speed/ROS state, malformed PWM, accepted
+zeros, and browser cadence. They do not compile the full ESP32 sketch, establish
+the deployed library version, or prove scheduling, braking, or mission safety.
