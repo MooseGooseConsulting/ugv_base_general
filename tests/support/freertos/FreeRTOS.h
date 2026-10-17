@@ -19,6 +19,7 @@ inline TickType_t xTaskGetTickCount() { return 0; }
 inline void vTaskDelayUntil(TickType_t*, TickType_t period) {
   if (stopTask) throw EndTask{};
   std::this_thread::sleep_for(std::chrono::milliseconds(period));
+  if (stopTask) throw EndTask{};
 }
 inline int xTaskCreate(void (*task)(void*), const char*, int, void*, int, void*) {
   if (failTask) return 0;

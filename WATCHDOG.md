@@ -121,9 +121,10 @@ was run.
 4. **Kill the host driver hard**: `kill -9 <driver-pid>` (or unplug the USB
    serial cable). Do **not** shut it down cleanly — a clean shutdown may send
    a final zero command.
-5. **Pass criterion**: the wheels stop within ~1 s of the last command
-   (500 ms watchdog + PID braking). If they do not, power the robot off and
-   do not proceed.
+5. **Pass criterion**: the wheels stop within about 1 s of the last command.
+   That 1 s figure is a provisional acceptance threshold. It is not a measured
+   braking-time budget, and the 500 ms watchdog period is not a stopping-time
+   guarantee. If they do not, power the robot off and do not proceed.
 6. Restart the driver and confirm motion commands work again (the watchdog
    resets on the first new command), and that an explicit zero command stream
    (host alive, commanding stop) is *not* watchdog-stopped — the robot simply

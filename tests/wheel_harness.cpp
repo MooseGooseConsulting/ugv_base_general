@@ -67,11 +67,15 @@ int main(int, char** argv) {
     realClock=true;
     CHECK(startWheelControl());
     CHECK(setGoalSpeed(.5,.5));
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
-    CHECK(duty[0]>0 && duty[1]>0);
-    // Main command context is blocked; only actual production task can expire.
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    CHECK(duty[0]==0 && duty[1]==0);
+    // The command context stays blocked. Only the production task can move or expire.
+    const auto movingBy = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < movingBy && !(duty[0] > 0 && duty[1] > 0))
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    CHECK(duty[0] > 0 && duty[1] > 0);
+    const auto stoppedBy = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < stoppedBy && !(duty[0] == 0 && duty[1] == 0))
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    CHECK(duty[0] == 0 && duty[1] == 0);
     return 0;
   }
   // Deterministic service invocations, without starting the asynchronous task.
