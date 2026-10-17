@@ -171,7 +171,7 @@ int main(int, char** argv) {
       mm_settings(type,0); setSpdRate(.5,1);
       clockMs=100; CHECK(setGoalSpeed(.2,.2)); WheelDriver::service();
       const auto before=WheelDriver::state.get();
-      for (const char* input : {R"({"T":1,"L":1,"R":0})", R"({"T":1,"L":0,"R":-0.5})", R"({"T":1,"L":3.4028235e38,"R":0})", R"({"T":13,"X":1,"Z":0})"}) {
+      for (const char* input : {R"({"T":1,"L":1.0001,"R":0})", R"({"T":1,"L":0,"R":-0.5001})", R"({"T":1,"L":3.4028235e38,"R":0})", R"({"T":13,"X":1,"Z":0})"}) {
         clockMs=550; deserializeJson(jsonCmdReceive,input); jsonCmdReceiveHandler();
         const auto after=WheelDriver::state.get();
         CHECK(after.acceptedAt==100 && after.left==before.left && after.right==before.right);
@@ -180,6 +180,19 @@ int main(int, char** argv) {
       clockMs=601; WheelDriver::service();
       CHECK(WheelDriver::state.get().mode==Mode::Stopped);
       CHECK(duty[0]==0 && duty[1]==0);
+    }
+  } else if (test=="speed-endpoint") {
+    for (int type : {1,2}) {
+      mm_settings(type,0); setSpdRate(1,1);
+      for (const char* input : {R"({"T":1,"L":0.5,"R":-0.5})", R"({"T":1,"L":-0.5,"R":0.5})", R"({"T":13,"X":0.5,"Z":0})", R"({"T":13,"X":-0.5,"Z":0})"}) {
+        clockMs=clockMs+100;
+        deserializeJson(jsonCmdReceive,input); jsonCmdReceiveHandler();
+        CHECK(WheelDriver::state.get().acceptedAt==clockMs);
+        CHECK(std::abs(WheelDriver::state.get().left)==255 && std::abs(WheelDriver::state.get().right)==255);
+        WheelDriver::service(); CHECK(duty[0]==255 && duty[1]==255);
+      }
+      setSpdRate(.5,.5); CHECK(setGoalSpeed(.5,-.5)); WheelDriver::service();
+      CHECK(duty[0]==128 && duty[1]==128);
     }
   } else if (test=="mapping") {
     mm_settings(1,0); setSpdRate(.5,1);

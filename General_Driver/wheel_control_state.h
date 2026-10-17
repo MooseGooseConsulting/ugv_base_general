@@ -73,12 +73,14 @@ class State {
     if (desired.type == 3)
       return accept(Mode::Speed, left * desired.scaleLeft, right * desired.scaleRight, now);
     // Validate the scaled PWM in double precision before conversion or acceptance.
-    // An overrange command must not renew the previous motion deadline.
+    // Legacy normalized endpoints +/-0.5 map to +/-256; admit those
+    // endpoints and clamp to the 8-bit duty limit before acceptance.
+    // Larger requests must not renew the previous motion deadline.
     const double leftPwm = static_cast<double>(left) * 512 * desired.scaleLeft;
     const double rightPwm = static_cast<double>(right) * 512 * desired.scaleRight;
     if (!std::isfinite(leftPwm) || !std::isfinite(rightPwm) ||
-        leftPwm < -255 || leftPwm > 255 || rightPwm < -255 || rightPwm > 255) return false;
-    return accept(Mode::Pwm, static_cast<float>(leftPwm), static_cast<float>(rightPwm), now);
+        leftPwm < -256 || leftPwm > 256 || rightPwm < -256 || rightPwm > 256) return false;
+    return accept(Mode::Pwm, pwm(leftPwm), pwm(rightPwm), now);
   }
   bool ros(float x, float z, uint32_t now) {
     if (!finite(x, z)) return false;

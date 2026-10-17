@@ -41,7 +41,7 @@ class WatchdogTests(unittest.TestCase):
         cls.tmp.cleanup()
 
     def test_input_and_timeout_contract(self):
-        for case in ["timeout", "pwm-timeout", "pwm-zero-type", "rejected-motion", "emergency", "rollover", "mapping", "scaled-overrange", "task-failure", "mutex-failure", "brake-integral", "unsampled-stop", "unsampled-expiry", "blocked-mission"]:
+        for case in ["timeout", "pwm-timeout", "pwm-zero-type", "rejected-motion", "emergency", "rollover", "mapping", "scaled-overrange", "speed-endpoint", "task-failure", "mutex-failure", "brake-integral", "unsampled-stop", "unsampled-expiry", "blocked-mission"]:
             with self.subTest(case=case):
                 result = subprocess.run([str(self.binary), case], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)

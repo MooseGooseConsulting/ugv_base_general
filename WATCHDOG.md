@@ -39,8 +39,9 @@ updates; command contexts never write wheel pins or mutate PID objects.
   requires a matching producer cadence and transport margin.
 - Speed/ROS requests must be finite, with the existing Beast wheel-speed bound
   of ±2 m/s. Direct PWM must have both finite numeric fields within ±255.
-  Other base types map speed to PWM in double precision and reject either scaled
-  wheel value outside ±255 before acceptance or integer conversion.
+  Other base types map speed to PWM in double precision and preserve the legacy
+  ±0.5 normalized endpoint (±256 before clamping) while rejecting larger scaled
+  values. Accepted endpoints clamp to ±255 before acceptance or integer conversion.
   Rejected motion leaves the request and deadline unchanged.
 - Wheel scales affect subsequent accepted speed/ROS commands, as in the prior
   implementation; changing scale does not refresh a motion deadline. PID gains
@@ -150,7 +151,7 @@ ARDUINOJSON_INCLUDE=/tmp/ugv-arduinojson-6.21.5/src PID_LIBRARY="$HOME/Arduino/l
 
 The harness compiles the complete production wheel adapter, pure state policy,
 actual motion/timeout JSON cases, real ArduinoJson and real PID_v2. GPIO, encoder,
-clock and RTOS interfaces are inert host adapters. Fourteen native scenarios cover
+clock and RTOS interfaces are inert host adapters. Fifteen native scenarios cover
 invalid settings/motion, rollover, PWM bounds, scaled speed/ROS overrange rejection without deadline refresh, direct-PWM expiry on all base types,
 zero-PWM followed by type changes, configuration after expiry,
 emergency stop, PID integral clearing, stop/reentry and expiry/new-motion between samples, creation
