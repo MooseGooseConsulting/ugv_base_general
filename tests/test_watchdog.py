@@ -12,6 +12,23 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def handler_cases(handler, first, following, expected):
+    """Fail clearly if handler edits change the isolated production cases."""
+    positions = []
+    for name in (first, following):
+        matches = list(re.finditer(r"^\s*case\s+" + re.escape(name) + r"\s*:", handler, re.MULTILINE))
+        if len(matches) != 1:
+            raise RuntimeError(f"uart_ctrl.h: expected one case marker for {name}, found {len(matches)}")
+        positions.append(matches[0].start())
+    if positions[0] >= positions[1]:
+        raise RuntimeError(f"uart_ctrl.h: {first} must precede {following}")
+    block = handler[positions[0]:positions[1]]
+    actual = re.findall(r"^\s*case\s+(CMD_\w+)\s*:", block, re.MULTILINE)
+    if actual != expected:
+        raise RuntimeError(f"uart_ctrl.h: expected cases {expected} before {following}, found {actual}")
+    return block
+
+
 class WatchdogTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -24,11 +41,16 @@ class WatchdogTests(unittest.TestCase):
             raise RuntimeError("Set PID_LIBRARY to the PID_v2 2.0.1 directory; see WATCHDOG.md")
         handler = (ROOT / "General_Driver/uart_ctrl.h").read_text()
         # Keep the actual motion and timeout cases; all unrelated handlers are excluded.
-        motion_cases = handler[handler.index("case CMD_SPEED_CTRL:"):handler.index("case CMD_SET_MOTOR_PID:")]
-        timeout_case = handler[handler.index("case CMD_HEART_BEAT_SET:"):handler.index("case CMD_GIMBAL_STEADY:")]
+        motion_cases = handler_cases(handler, "CMD_SPEED_CTRL", "CMD_SET_MOTOR_PID",
+                                     ["CMD_SPEED_CTRL", "CMD_PWM_INPUT", "CMD_ROS_CTRL"])
+        timeout_case = handler_cases(handler, "CMD_HEART_BEAT_SET", "CMD_GIMBAL_STEADY",
+                                     ["CMD_HEART_BEAT_SET"])
         cpp = (ROOT / "tests/wheel_harness.cpp").read_text()
         cases = '\nvoid jsonCmdReceiveHandler(){ int cmdType = jsonCmdReceive["T"].as<int>(); switch(cmdType){' + motion_cases + timeout_case + '}}\n'
-        cpp = cpp.replace('// JSON_CASES inserted by the Python runner.', cases)
+        marker = '// JSON_CASES inserted by the Python runner.'
+        if cpp.count(marker) != 1:
+            raise RuntimeError(f"wheel_harness.cpp: expected one JSON_CASES insertion marker, found {cpp.count(marker)}")
+        cpp = cpp.replace(marker, cases)
         source = Path(cls.tmp.name) / "watchdog.cpp"
         source.write_text(cpp)
         cls.binary = Path(cls.tmp.name) / "watchdog"

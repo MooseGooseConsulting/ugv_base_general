@@ -367,8 +367,8 @@ bool uartCmdEcho = 1;
 // Motion-command watchdog timeout in milliseconds.
 // If no valid motion command (T:1 speed ctrl, T:11 PWM input, T:13 ROS
 // velocity ctrl) arrives within this window, the independent wheel task
-// requests zero speed (Beast) or disables PWM (other types). The watchdog is armed from boot, so the default
-// state is stopped until the first motion command is received.
+// requests zero-goal PID braking for Beast/type 3 or disables PWM for types 1/2.
+// The default state is stopped until the first accepted motion command.
 // Can be tuned at runtime with {"T":136,"cmd":<ms>} (CMD_HEART_BEAT_SET).
 #define MOTION_CMD_WATCHDOG_MS 500
 
