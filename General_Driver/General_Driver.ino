@@ -215,7 +215,7 @@ void setup() {
 
   initEncoders();
 
-  pidControllerInit();
+  if (!startWheelControl()) Serial.println("Wheel control unavailable: motion disabled.");
 
   screenLine_2 = String("MAC:") + macToString(thisDevMac);
   oled_update();
@@ -245,14 +245,6 @@ void loop() {
     runNewJsonCmd = false;
   }
 
-  getLeftSpeed();
-
-  LeftPidControllerCompute();
-  
-  getRightSpeed();
-  
-  RightPidControllerCompute();
-  
   oledInfoUpdate();
 
   updateIMUData();
@@ -261,7 +253,6 @@ void loop() {
     baseInfoFeedback();
   }
 
-  heartBeatCtrl();
 
   size_t freeHeap = esp_get_free_heap_size();
 }

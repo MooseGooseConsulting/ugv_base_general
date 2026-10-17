@@ -1,449 +1,234 @@
-// switch parts
-int switch_pwm_A = 0;
-int switch_pwm_B = 0;
-bool usePIDCompute = false;
-float spd_rate_A = 1.0;
-float spd_rate_B = 1.0;
-bool heartbeatStopFlag = false;
+#pragma once
 
-void movtionPinInit(){
-  pinMode(AIN1, OUTPUT);
-  pinMode(AIN2, OUTPUT);
-  pinMode(PWMA, OUTPUT);
-  pinMode(BIN1, OUTPUT);
-  pinMode(BIN2, OUTPUT);
-  pinMode(PWMB, OUTPUT);
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
+#include "wheel_control_state.h"
 
-  ledcSetup(channel_A, freq, ANALOG_WRITE_BITS);
-  ledcAttachPin(PWMA, channel_A);
-
-  ledcSetup(channel_B, freq, ANALOG_WRITE_BITS);
-  ledcAttachPin(PWMB, channel_B);
-
-  digitalWrite(AIN1, LOW);
-  digitalWrite(AIN2, LOW);
-  digitalWrite(BIN1, LOW);
-  digitalWrite(BIN2, LOW);
-}
-
-
-void switchEmergencyStop(){
-  digitalWrite(AIN1, LOW);
-  digitalWrite(AIN2, LOW);
-
-  digitalWrite(BIN1, LOW);
-  digitalWrite(BIN2, LOW);
-}
-
-
-void switchPortCtrlA(float pwmInputA){
-  int pwmIntA = round(pwmInputA * spd_rate_A);
-  if(abs(pwmIntA) < 1e-6){
-    digitalWrite(AIN1, LOW);
-    digitalWrite(AIN2, LOW);
-    return;
-  }
-
-  if(pwmIntA > 0){
-    digitalWrite(AIN1, LOW);
-    digitalWrite(AIN2, HIGH);
-    ledcWrite(channel_A, pwmIntA);
-  }
-  else{
-    digitalWrite(AIN1, HIGH);
-    digitalWrite(AIN2, LOW);
-    ledcWrite(channel_A,-pwmIntA);
-  }
-}
-
-
-void switchPortCtrlB(float pwmInputB){
-  int pwmIntB = round(pwmInputB * spd_rate_B);
-  if(abs(pwmIntB) < 1e-6){
-    digitalWrite(BIN1, LOW);
-    digitalWrite(BIN2, LOW);
-    return;
-  }
-
-  if(pwmIntB > 0){
-    digitalWrite(BIN1, LOW);
-    digitalWrite(BIN2, HIGH);
-    ledcWrite(channel_B, pwmIntB);
-  }
-  else{
-    digitalWrite(BIN1, HIGH);
-    digitalWrite(BIN2, LOW);
-    ledcWrite(channel_B,-pwmIntB);
-  }
-}
-
-
-void switchCtrl(int pwmIntA, int pwmIntB) {
-    switch_pwm_A = pwmIntA;
-    switch_pwm_B = pwmIntB;
-    switchPortCtrlA(switch_pwm_A);
-    switchPortCtrlB(switch_pwm_B);
-}
-
-
-void lightCtrl(int pwmIn) {
-  switch_pwm_A = pwmIn;
-  switchPortCtrlA(-abs(switch_pwm_A));
-}
-
-
-void setSpdRate(float inputL, float inputR) {
-  inputL = abs(inputL);
-  if (inputL > 1) {
-    inputL = 1;
-  }
-  inputR = abs(inputR);
-  if (inputR > 1) {
-    inputR = 1;
-  }
-  spd_rate_A = inputL;
-  spd_rate_B = inputR;
-}
-
-
-void getSpdRate() {
-  jsonInfoHttp.clear();
-  jsonInfoHttp["T"] = CMD_GET_SPD_RATE;
-
-  jsonInfoHttp["L"] = spd_rate_A;
-  jsonInfoHttp["R"] = spd_rate_B;
-
-  String getInfoJsonString;
-  serializeJson(jsonInfoHttp, getInfoJsonString);
-  Serial.println(getInfoJsonString);
-}
-
-
-
-// movtion parts.
-// A-left, B-right
-
-ESP32Encoder encoderA;
-ESP32Encoder encoderB;
-
-static unsigned long lastTime = 0;
-static unsigned long lastLeftSpdTime = 0;
-static unsigned long lastRightSpdTime = 0;
-int lastEncoderA = 0;
-int lastEncoderB = 0;
-
-double speedGetA;
-double speedGetB;
-
-double plusesRate = 3.14159265359 * WHEEL_D / ONE_CIRCLE_PLUSES;
-
-
-void initEncoders() {
-  // if(SET_MOTOR_DIR){
-  //   encoderA.attachHalfQuad(AENCB, AENCA);
-  //   encoderB.attachHalfQuad(BENCB, BENCA);
-  // }else{
-  encoderA.attachHalfQuad(AENCA, AENCB);
-  encoderB.attachHalfQuad(BENCA, BENCB);
-  // }
-  encoderA.setCount(0);
-  encoderB.setCount(0);
-}
-
-void getWheelSpeed() {
-  unsigned long currentTime = micros();
-  long encoderPulsesA = encoderA.getCount();
-  long encoderPulsesB = encoderB.getCount();
-
-  if (!SET_MOTOR_DIR) {
-    speedGetA = (plusesRate * (encoderPulsesA - lastEncoderA)) / ((double)(currentTime - lastTime) / 1000000);
-    speedGetB = (plusesRate * (encoderPulsesB - lastEncoderB)) / ((double)(currentTime - lastTime) / 1000000);
-  } else {
-    speedGetA = (plusesRate * (lastEncoderA - encoderPulsesA)) / ((double)(currentTime - lastTime) / 1000000);
-    speedGetB = (plusesRate * (lastEncoderB - encoderPulsesB)) / ((double)(currentTime - lastTime) / 1000000);
-  }
-  lastEncoderA = encoderPulsesA;
-  lastEncoderB = encoderPulsesB;
-  lastTime = currentTime;
-}
-
-void getLeftSpeed() {
-  unsigned long currentTime = micros();
-  long encoderPulsesA = encoderA.getCount();
-  if (!SET_MOTOR_DIR) {
-    speedGetA = (plusesRate * (encoderPulsesA - lastEncoderA)) / ((double)(currentTime - lastLeftSpdTime) / 1000000);
-  } else {
-    speedGetA = (plusesRate * (lastEncoderA - encoderPulsesA)) / ((double)(currentTime - lastLeftSpdTime) / 1000000);
-  }
-  lastEncoderA = encoderPulsesA;
-  lastLeftSpdTime = currentTime;
-}
-
-void getRightSpeed() {
-  unsigned long currentTime = micros();
-  long encoderPulsesB = encoderB.getCount();
-  if (!SET_MOTOR_DIR) {
-    speedGetB = (plusesRate * (encoderPulsesB - lastEncoderB)) / ((double)(currentTime - lastRightSpdTime) / 1000000);
-  } else {
-    speedGetB = (plusesRate * (lastEncoderB - encoderPulsesB)) / ((double)(currentTime - lastRightSpdTime) / 1000000);
-  }
-  lastEncoderB = encoderPulsesB;
-  lastRightSpdTime = currentTime;
-}
-
-
-
-
-
-// --- PID Controller ---
-
+// Only service() (and pin initialization before task creation) writes motors.
+// Command contexts publish POD state under the same short mutex. Never put
+// JSON, serial, filesystem, mission, arm or gimbal work inside this mutex.
+namespace WheelDriver {
+WheelControl::State state(MOTION_CMD_WATCHDOG_MS, __kp, __ki, __kd, windup_limits);
+SemaphoreHandle_t mutex = nullptr;
+bool ready = false;
+ESP32Encoder encoderA, encoderB;
 PID_v2 pidA(__kp, __ki, __kd, PID::Direct);
 PID_v2 pidB(__kp, __ki, __kd, PID::Direct);
+double measuredLeft = 0, measuredRight = 0;
+int64_t previousLeft = 0, previousRight = 0;
+uint32_t previousMicros = 0;
+int sampledType = 0;
+uint32_t appliedResetEpoch = UINT32_MAX;
+float previousKp = -1, previousKi = -1, previousKd = -1;
 
-double outputA = 0;
-double outputB = 0;
-double setpointA = 0;
-double setpointB = 0;
-
-int setpoint_interval = 200;
-unsigned long setpoint_cmd_recv = millis();
-unsigned long setpoint_last_time = millis();
-float setpointA_buffer;
-float setpointB_buffer;
-float setpointA_last;
-float setpointB_last;
-float change_offset = 0.005;
-bool new_setpoint_flag = false;
-
-void pidControllerInit() {
-  pidA.Start(speedGetA,
-             outputA,
-             setpointA);
-  pidA.SetOutputLimits(-255, 255);
-  pidA.SetMode(PID::Automatic);
-
-  pidB.Start(speedGetB,
-             outputB,
-             setpointB);
-  pidB.SetOutputLimits(-255, 255);
-  pidB.SetMode(PID::Automatic);
+void hardStop() {
+  ledcWrite(channel_A, 0);
+  ledcWrite(channel_B, 0);
+  digitalWrite(AIN1, LOW); digitalWrite(AIN2, LOW);
+  digitalWrite(BIN1, LOW); digitalWrite(BIN2, LOW);
 }
 
-void leftCtrl(float pwmInputA){
-  int pwmIntA = round(pwmInputA);
-  if (mainType != 3) {
-    speedGetA = pwmIntA;
+void output(int pin1, int pin2, int channel, double value, bool reversed) {
+  // Saturate before integer conversion; malformed PID output fails closed.
+  int pwm = std::isfinite(value) ? lround(WheelControl::State::pwm(value)) : 0;
+  if (pwm == 0) {
+    ledcWrite(channel, 0);
+    digitalWrite(pin1, LOW); digitalWrite(pin2, LOW);
+    return;
   }
-  if(SET_MOTOR_DIR){
-    if(pwmIntA < 0){
-      digitalWrite(AIN1, HIGH);
-      digitalWrite(AIN2, LOW);
-      ledcWrite(channel_A, abs(pwmIntA));
-    }
-    else{
-      digitalWrite(AIN1, LOW);
-      digitalWrite(AIN2, HIGH);
-      ledcWrite(channel_A, abs(pwmIntA));
-    }
-  }else{
-    if(pwmIntA < 0){
-      digitalWrite(AIN1, LOW);
-      digitalWrite(AIN2, HIGH);
-      ledcWrite(channel_A, abs(pwmIntA));
-    }
-    else{
-      digitalWrite(AIN1, HIGH);
-      digitalWrite(AIN2, LOW);
-      ledcWrite(channel_A, abs(pwmIntA));
-    }
-  }
+  digitalWrite(pin1, (pwm < 0) == reversed ? HIGH : LOW);
+  digitalWrite(pin2, (pwm < 0) == reversed ? LOW : HIGH);
+  ledcWrite(channel, abs(pwm));
 }
 
-void rightCtrl(float pwmInputB){
-  int pwmIntB = round(pwmInputB);
-  if (mainType != 3) {
-    speedGetB = pwmIntB;
+// Called only by the wheel task. Its work is bounded: one encoder sample,
+// two PID updates and two PWM writes. No command dispatch or blocking mission.
+void service() {
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  state.expire(millis());
+  const auto desired = state.get();
+  const bool reversed = desired.type != 1;
+  const double diameter = desired.type == 3 ? .0523 : .0800;
+  const int pulses = desired.type == 1 ? 2100 : desired.type == 2 ? 1650 : 1092;
+  const uint32_t now = micros();
+  const int64_t left = encoderA.getCount(), right = encoderB.getCount();
+  const uint32_t elapsed = now - previousMicros;
+  const bool typeChanged = sampledType != desired.type;
+  if (typeChanged) {
+    sampledType = desired.type;
+    measuredLeft = measuredRight = 0;
+  } else if (elapsed) {
+    const double factor = (reversed ? -1 : 1) * 3.14159265359 * diameter / pulses * 1000000.0 / elapsed;
+    measuredLeft = (left - previousLeft) * factor;
+    measuredRight = (right - previousRight) * factor;
   }
-  if(SET_MOTOR_DIR){
-    if(pwmIntB < 0){
-      digitalWrite(BIN1, HIGH);
-      digitalWrite(BIN2, LOW);
-      ledcWrite(channel_B, abs(pwmIntB));
-    }
-    else{
-      digitalWrite(BIN1, LOW);
-      digitalWrite(BIN2, HIGH);
-      ledcWrite(channel_B, abs(pwmIntB));
-    }
-  }else{
-    if(pwmIntB < 0){
-      digitalWrite(BIN1, LOW);
-      digitalWrite(BIN2, HIGH);
-      ledcWrite(channel_B, abs(pwmIntB));
-    }
-    else{
-      digitalWrite(BIN1, HIGH);
-      digitalWrite(BIN2, LOW);
-      ledcWrite(channel_B, abs(pwmIntB));
-    }
+  previousLeft = left; previousRight = right; previousMicros = now;
+
+  if (desired.kp != previousKp || desired.ki != previousKi || desired.kd != previousKd) {
+    pidA.SetTunings(desired.kp, desired.ki, desired.kd);
+    pidB.SetTunings(desired.kp, desired.ki, desired.kd);
+    previousKp = desired.kp; previousKi = desired.ki; previousKd = desired.kd;
   }
-}
-
-void setGoalSpeed(float inputLeft, float inputRight) {
-  // setpoint_cmd_recv = millis();
-  if (mainType == 3) {
-    usePIDCompute = true;
-
-    if(inputLeft < -2.0 || inputLeft > 2.0){
-      return;
-    }
-
-    if(inputRight < -2.0 || inputRight > 2.0){
-      return;
-    }
-    
-    setpointA = inputLeft*spd_rate_A;
-    setpointB = inputRight*spd_rate_B;
-
-    if (setpointA != setpointA_buffer) {
-      pidA.Setpoint(setpointA);
-      setpointA_buffer = inputLeft;
-    }
-    
-    if (setpointB != setpointB_buffer) {
-      pidB.Setpoint(setpointB);
-      setpointB_buffer = inputRight;
-    }
+  if (desired.mode == WheelControl::Mode::Stopped) {
+    hardStop(); // Emergency/configuration stop cannot be undone by PID state.
+  } else if (desired.mode == WheelControl::Mode::Pwm) {
+    output(AIN1, AIN2, channel_A, desired.left, reversed);
+    output(BIN1, BIN2, channel_B, desired.right, reversed);
   } else {
-    usePIDCompute = false;
-    leftCtrl(inputLeft * 512 * spd_rate_A);
-    rightCtrl(inputRight * 512 * spd_rate_B);
-  }
-}
-
-void pidControllerCompute() {
-  if (!usePIDCompute) {
-    return;
-  }
-
-  outputA = pidA.Run(speedGetA);
-  if (abs(outputA)<THRESHOLD_PWM) {
-    outputA = 0;
-  }
-  if (setpointA == 0 && speedGetA == 0) {
-    outputA = 0;
-  }
-  leftCtrl(outputA);
-
-  outputB = pidB.Run(speedGetB);
-  if (abs(outputB)<THRESHOLD_PWM) {
-    outputB = 0;
-  }
-  if (setpointB == 0 && speedGetB == 0) {
-    outputB = 0;
-  }
-  rightCtrl(outputB);
-}
-
-void LeftPidControllerCompute() {
-  if (!usePIDCompute) {
-    return;
-  }
-
-  outputA = pidA.Run(speedGetA);
-  if (abs(outputA)<THRESHOLD_PWM) {
-    outputA = 0;
-  }
-  if (setpointA == 0 && speedGetA == 0) {
-    outputA = 0;
-  }
-  leftCtrl(outputA);
-}
-
-void RightPidControllerCompute() {
-  if (!usePIDCompute) {
-    return;
-  }
-
-  outputB = pidB.Run(speedGetB);
-  if (abs(outputB)<THRESHOLD_PWM) {
-    outputB = 0;
-  }
-  if (setpointB == 0 && speedGetB == 0) {
-    outputB = 0;
-  }
-  rightCtrl(outputB);
-}
-
-void setPID(float inputP, float inputI, float inputD, float inputLimits) {
-  __kp = inputP;
-  __ki = inputI;
-  __kd = inputD;
-  windup_limits = inputLimits;
-  pidA.SetTunings(__kp, __ki, __kd);
-  pidB.SetTunings(__kp, __ki, __kd);
-}
-
-void rosCtrl(float rosX, float rosZ) {
-  setpointA = rosX - (rosZ * TRACK_WIDTH / 2.0);
-  setpointB = rosX + (rosZ * TRACK_WIDTH / 2.0);
-  setGoalSpeed(setpointA, setpointB);
-}
-
-void heartBeatCtrl() {
-  if (currentTimeMillis - lastCmdRecvTime > HEART_BEAT_DELAY) {
-    if (!heartbeatStopFlag) {
-      heartbeatStopFlag = true;
-      setGoalSpeed(0, 0);
-      // leftCtrl(0);
-      // rightCtrl(0);
+    // Reset cached output/integral on entry, particularly watchdog braking.
+    // Otherwise PID_v2 can replay the old nonzero output until its next sample.
+    if (appliedResetEpoch != desired.resetEpoch || typeChanged) {
+      pidA.SetMode(PID::Manual); pidB.SetMode(PID::Manual);
+      pidA.Start(measuredLeft, 0, desired.left);
+      pidB.Start(measuredRight, 0, desired.right);
     }
+    pidA.Setpoint(desired.left); pidB.Setpoint(desired.right);
+    double leftPwm = pidA.Run(measuredLeft), rightPwm = pidB.Run(measuredRight);
+    if (abs(leftPwm) < THRESHOLD_PWM || (desired.left == 0 && measuredLeft == 0)) leftPwm = 0;
+    if (abs(rightPwm) < THRESHOLD_PWM || (desired.right == 0 && measuredRight == 0)) rightPwm = 0;
+    output(AIN1, AIN2, channel_A, leftPwm, reversed);
+    output(BIN1, BIN2, channel_B, rightPwm, reversed);
   }
+  appliedResetEpoch = desired.resetEpoch;
+  xSemaphoreGive(mutex);
 }
 
-void changeHeartBeatDelay(int inputCmd) {
-  HEART_BEAT_DELAY = inputCmd;
+void task(void*) {
+  TickType_t wake = xTaskGetTickCount();
+  const TickType_t period = pdMS_TO_TICKS(5) > 0 ? pdMS_TO_TICKS(5) : 1;
+  for (;;) {
+    service();
+    vTaskDelayUntil(&wake, period);
+  }
+}
+} // namespace WheelDriver
+
+void movtionPinInit() {
+  pinMode(AIN1, OUTPUT); pinMode(AIN2, OUTPUT); pinMode(PWMA, OUTPUT);
+  pinMode(BIN1, OUTPUT); pinMode(BIN2, OUTPUT); pinMode(PWMB, OUTPUT);
+  ledcSetup(channel_A, freq, ANALOG_WRITE_BITS); ledcAttachPin(PWMA, channel_A);
+  ledcSetup(channel_B, freq, ANALOG_WRITE_BITS); ledcAttachPin(PWMB, channel_B);
+  WheelDriver::hardStop();
+  WheelDriver::mutex = xSemaphoreCreateMutex();
+}
+
+void initEncoders() {
+  WheelDriver::encoderA.attachHalfQuad(AENCA, AENCB);
+  WheelDriver::encoderB.attachHalfQuad(BENCA, BENCB);
+  WheelDriver::encoderA.setCount(0); WheelDriver::encoderB.setCount(0);
+}
+
+bool startWheelControl() {
+  using namespace WheelDriver;
+  if (!mutex) return false; // Pin initialization already left outputs off.
+  state.type(mainType, millis());
+  pidA.SetOutputLimits(-255, 255); pidB.SetOutputLimits(-255, 255);
+  previousMicros = micros();
+  // ESP-IDF stack size is bytes. Priority 3 preempts Arduino loop's priority 1,
+  // on either single- or dual-core builds. No affinity to a possibly absent core.
+  if (xTaskCreate(task, "wheel-control", 4096, nullptr, 3, nullptr) != pdPASS) return false;
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  ready = true;
+  xSemaphoreGive(mutex);
+  return true;
+}
+
+bool setGoalSpeed(float left, float right) {
+  using namespace WheelDriver;
+  if (!mutex) return false;
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  const bool accepted = ready && state.speed(left, right, millis());
+  xSemaphoreGive(mutex);
+  return accepted;
+}
+
+bool rosCtrl(float x, float z) {
+  using namespace WheelDriver;
+  if (!mutex) return false;
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  const bool accepted = ready && state.ros(x, z, millis());
+  xSemaphoreGive(mutex);
+  return accepted;
+}
+
+bool setWheelPwm(float left, float right) {
+  using namespace WheelDriver;
+  if (!mutex) return false;
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  const bool accepted = ready && state.raw(left, right, millis());
+  xSemaphoreGive(mutex);
+  return accepted;
+}
+
+void switchEmergencyStop() {
+  using namespace WheelDriver;
+  if (!mutex) return;
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  state.stop();
+  xSemaphoreGive(mutex);
+}
+
+void changeHeartBeatDelay(int value) {
+  using namespace WheelDriver;
+  if (!mutex) return;
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  state.timeout(value, millis());
+  xSemaphoreGive(mutex);
+}
+
+void setSpdRate(float left, float right) {
+  using namespace WheelDriver;
+  if (!mutex) return;
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  state.scale(left, right, millis());
+  xSemaphoreGive(mutex);
+}
+
+void setPID(float p, float i, float d, float limits) {
+  using namespace WheelDriver;
+  if (!mutex) return;
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  state.gains(p, i, d, limits, millis());
+  xSemaphoreGive(mutex);
+}
+
+struct WheelFeedback { double left = 0, right = 0; float scaleLeft = 1, scaleRight = 1; };
+WheelFeedback wheelFeedback() {
+  using namespace WheelDriver;
+  WheelFeedback result;
+  if (!mutex) return result;
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  result.left = measuredLeft; result.right = measuredRight;
+  result.scaleLeft = state.get().scaleLeft; result.scaleRight = state.get().scaleRight;
+  xSemaphoreGive(mutex);
+  return result;
+}
+
+void getSpdRate() {
+  const auto feedback = wheelFeedback();
+  jsonInfoHttp.clear();
+  jsonInfoHttp["T"] = CMD_GET_SPD_RATE;
+  jsonInfoHttp["L"] = feedback.scaleLeft; jsonInfoHttp["R"] = feedback.scaleRight;
+  String text;
+  serializeJson(jsonInfoHttp, text); Serial.println(text);
 }
 
 void mm_settings(byte inputMain, byte inputModule) {
-  mainType = inputMain;
-  moduleType = inputModule;
-
-  if (mainType == 1) {
-    WHEEL_D = 0.0800;
-    ONE_CIRCLE_PLUSES = 2100;
-    TRACK_WIDTH = 0.125;
-    SET_MOTOR_DIR = false; // checked
-    usePIDCompute = false;
-  } else if (mainType == 2) {
-    WHEEL_D = 0.0800;
-    ONE_CIRCLE_PLUSES = 1650;
-    TRACK_WIDTH = 0.172;
-    SET_MOTOR_DIR = true; // checked
-    usePIDCompute = false;
-  } else if (mainType == 3) {
-    WHEEL_D = 0.0523;
-    ONE_CIRCLE_PLUSES = 1092;
-    TRACK_WIDTH = 0.141;
-    SET_MOTOR_DIR = true; // checked
-    usePIDCompute = true;
+  if (inputMain < 1 || inputMain > 3) return;
+  if (WheelDriver::mutex) {
+    xSemaphoreTake(WheelDriver::mutex, portMAX_DELAY);
+    WheelDriver::state.type(inputMain, millis());
+    xSemaphoreGive(WheelDriver::mutex);
   }
-  plusesRate = 3.14159265359 * WHEEL_D / ONE_CIRCLE_PLUSES;
-  // initEncoders();
-
-  if (mainType == 1) {
-    screenLine_2 = "RaspRover";
-  } else if (mainType == 2) {
-    screenLine_2 = "UGV02";
-  } else if (mainType == 3) {
-    screenLine_2 = "UGV01";
-  } 
-
-  if (moduleType == 0) {
-    screenLine_2 += " Null";
-  } else if (moduleType == 1) {
-    screenLine_2 += " Arm";
-  } else if (moduleType == 2) {
-    screenLine_2 += " PT";
-  } 
+  mainType = inputMain; moduleType = inputModule;
+  // UI/config fields remain in the command context. The task uses its own copy.
+  WHEEL_D = mainType == 3 ? .0523 : .0800;
+  ONE_CIRCLE_PLUSES = mainType == 1 ? 2100 : mainType == 2 ? 1650 : 1092;
+  TRACK_WIDTH = mainType == 1 ? .125 : mainType == 2 ? .172 : .141;
+  SET_MOTOR_DIR = mainType != 1;
+  screenLine_2 = mainType == 1 ? "RaspRover" : mainType == 2 ? "UGV02" : "UGV01";
+  if (moduleType == 0) screenLine_2 += " Null";
+  else if (moduleType == 1) screenLine_2 += " Arm";
+  else if (moduleType == 2) screenLine_2 += " PT";
 }
